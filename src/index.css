@@ -1,0 +1,92 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap');
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overflow-x: hidden;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background:
+    radial-gradient(ellipse at top left, rgba(168, 85, 247, 0.25), transparent 50%),
+    radial-gradient(ellipse at bottom right, rgba(34, 211, 238, 0.18), transparent 50%),
+    radial-gradient(ellipse at center, rgba(255, 61, 166, 0.12), transparent 60%),
+    #08051a;
+  background-attachment: fixed;
+  color: white;
+  min-height: 100vh;
+}
+
+@layer components {
+  .glass {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10;
+  }
+  .glass-strong {
+    @apply bg-white/10 backdrop-blur-2xl border border-white/15;
+  }
+  .btn-primary {
+    @apply px-6 py-3 rounded-2xl font-semibold tracking-wide
+           bg-gradient-to-r from-neon-purple to-neon-pink
+           hover:shadow-[0_0_30px_rgba(168,85,247,0.6)]
+           transition-all duration-200 active:scale-95
+           disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100;
+  }
+  .btn-ghost {
+    @apply px-6 py-3 rounded-2xl font-semibold tracking-wide
+           bg-white/5 hover:bg-white/10 border border-white/10
+           transition-all duration-200 active:scale-95;
+  }
+  .input {
+    @apply w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/10
+           focus:border-neon-purple focus:bg-white/10 focus:outline-none
+           transition-all placeholder:text-white/30 text-white;
+  }
+  .card {
+    @apply glass rounded-3xl p-6;
+  }
+}
+
+/* Particle effect */
+.particle {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+/* Block pieces — glow on hover */
+.piece-cell {
+  transition: all 0.2s;
+}
+.piece-cell:hover {
+  filter: brightness(1.2);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: rgba(255,255,255,0.02); }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+
+/* Reduce motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
