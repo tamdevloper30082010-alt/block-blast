@@ -24,7 +24,6 @@ type DragState = {
   pieceIdx: number;
   piece: Piece;
   pointerId: number;
-  // pointer position (clientX/Y)
   x: number;
   y: number;
 };
@@ -47,11 +46,14 @@ export default function GamePage() {
   const [showScorePop, setShowScorePop] = useState<{ val: number; key: number } | null>(null);
   const [clearing, setClearing] = useState<{ rows: number[]; cols: number[] } | null>(null);
   const [showHint, setShowHint] = useState(true);
+
+  // LOCAL score state — updates immediately, no waiting on realtime roundtrip
+  const [myScore, setMyScore] = useState(0);
+
   const boardRef = useRef<HTMLDivElement | null>(null);
   const cellSize = 42;
   const gap = 3;
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-  const lastSaveRef = useRef(0);
 
   // Load room + initial pieces
   useEffect(() => {
@@ -108,7 +110,11 @@ export default function GamePage() {
     if (data) {
       setPlayers(data);
       const me = data.find(p => p.player_id === playerId);
-      if (me) setMyBoard(me.board);
+      if (me) {
+        setMyBoard(me.board);
+        // Sync myScore from DB on initial load (only if local is 0)
+        if (myScore === 0 && me.score > 0) setMyScore(me.score);
+      }
     }
   }
 
@@ -181,7 +187,6 @@ export default function GamePage() {
       setHoverCol(-1);
     };
 
-    // Prevent page scroll on mobile during drag
     const preventTouch = (e: TouchEvent) => {
       if (drag) e.preventDefault();
     };
@@ -233,6 +238,9 @@ export default function GamePage() {
     let scoreGained = calculateScore(blocksPlaced, rows.length, cols.length, combo);
     let newCombo = combo;
 
+    // Update score IMMEDIATELY for instant UI feedback
+    setMyScore(s => s + scoreGained);
+
     if (rows.length > 0 || cols.length > 0) {
       newCombo = combo + 1;
       setCombo(newCombo);
@@ -251,12 +259,12 @@ export default function GamePage() {
       setTimeout(() => {
         finalBoard = clearLines(placed, rows, cols);
         setMyBoard(finalBoard);
-        saveState(finalBoard, scoreGained, newCombo);
+        saveState(finalBoard, newCombo);
       }, 380);
     } else {
       setCombo(0);
       setMyBoard(placed);
-      saveState(placed, scoreGained, 0);
+      saveState(placed, 0);
     }
 
     setShowScorePop({ val: scoreGained, key: Date.now() });
@@ -275,7 +283,7 @@ export default function GamePage() {
       setTimeout(() => {
         const remaining = newPieces.filter(p => p);
         if (remaining.length > 0 && !canPlaceAny(finalBoard, remaining)) {
-          saveState(finalBoard, 0, 0, true);
+          saveState(finalBoard, 0, true);
         }
       }, 450);
     }
@@ -329,16 +337,12 @@ export default function GamePage() {
     setParticles(prev => prev.filter(p => p.id !== id));
   };
 
-  async function saveState(board: number[][], scoreDelta: number, newCombo: number, dead = false) {
+  // Save board state (no score here — score is local state, only synced to DB occasionally)
+  async function saveState(board: number[][], newCombo: number, dead = false) {
     if (!room || !myPlayer) return;
-    const now = Date.now();
-    if (now - lastSaveRef.current < 150) return;
-    lastSaveRef.current = now;
-
-    const newScore = myPlayer.score + scoreDelta;
     await supabase.from('players').update({
       board,
-      score: newScore,
+      score: myScore, // sync the current score
       combo: newCombo,
       is_alive: dead ? false : myPlayer.is_alive,
       last_active_at: new Date().toISOString(),
@@ -357,31 +361,35 @@ export default function GamePage() {
     );
   }
 
+  // DRAG OFFSET: piece appears ABOVE the finger (like real Block Blast)
+  const DRAG_OFFSET_Y = -90;
+  const DRAG_SCALE = 1.15;
+
   return (
     <div
       className="min-h-screen flex flex-col p-3 md:p-4 max-w-2xl mx-auto w-full select-none"
       style={{ touchAction: drag ? 'none' : 'pan-y' }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full glass">
           <Clock size={16} className="text-neon-cyan" />
           <span className={`font-display font-bold text-2xl ${timeLeft <= 10 ? 'text-red-400 animate-pulse' : 'text-white'}`}>
             {timeStr}
           </span>
         </div>
-        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full glass">
-          <Trophy size={14} className="text-yellow-400" />
-          <motion.span
-            key={myPlayer?.score}
-            initial={{ scale: 1.4 }}
-            animate={{ scale: 1 }}
-            className="font-bold text-sm"
-          >
-            {myPlayer?.score ?? 0}
-          </motion.span>
-        </div>
-        <div className="flex items-center gap-1.5 text-white/60 text-xs">
+        <motion.div
+          className="flex items-center gap-2 px-4 py-2 rounded-full glass-strong"
+          animate={{ scale: myScore > 0 ? [1, 1.1, 1] : 1 }}
+          transition={{ duration: 0.3 }}
+          key={`score-${myScore}`}
+        >
+          <Trophy size={18} className="text-yellow-400" />
+          <span className="font-display font-bold text-2xl text-yellow-300 tabular-nums">
+            {myScore}
+          </span>
+        </motion.div>
+        <div className="flex items-center gap-1.5 text-white/60 text-xs px-3 py-1.5 rounded-full glass">
           <span className="font-mono tracking-wider">{code}</span>
         </div>
       </div>
@@ -394,27 +402,34 @@ export default function GamePage() {
             Đối thủ ({otherPlayers.length})
           </p>
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {otherPlayers.map(p => (
-              <div key={p.id} className="glass rounded-2xl p-2 flex-shrink-0 min-w-[100px]">
-                <div className="flex items-center justify-between mb-1.5 gap-2">
-                  <span className="font-semibold text-white text-xs truncate max-w-[80px]">{p.name}</span>
-                  <motion.span
-                    key={p.score}
-                    initial={{ scale: 1.4 }}
-                    animate={{ scale: 1 }}
-                    className="font-display font-bold text-base text-neon-cyan tabular-nums"
-                  >
-                    {p.score}
-                  </motion.span>
-                </div>
-                <BoardView
-                  board={p.board && p.board.length > 0 ? p.board : createEmptyBoard()}
-                  myId={myPlayerNum || 1}
-                  size="xs"
-                  hideGrid
-                />
-              </div>
-            ))}
+            {otherPlayers.map(p => {
+              const displayScore = p.score ?? 0;
+              return (
+                <motion.div
+                  key={p.id}
+                  layout
+                  className="glass rounded-2xl p-2 flex-shrink-0 min-w-[120px]"
+                >
+                  <div className="flex items-center justify-between mb-1.5 gap-2">
+                    <span className="font-semibold text-white text-xs truncate max-w-[70px]">{p.name}</span>
+                    <motion.span
+                      key={displayScore}
+                      initial={{ scale: 1.5 }}
+                      animate={{ scale: 1 }}
+                      className="font-display font-bold text-xl text-neon-cyan tabular-nums"
+                    >
+                      {displayScore}
+                    </motion.span>
+                  </div>
+                  <BoardView
+                    board={p.board && p.board.length > 0 ? p.board : createEmptyBoard()}
+                    myId={myPlayerNum || 1}
+                    size="xs"
+                    hideGrid
+                  />
+                </motion.div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -431,7 +446,7 @@ export default function GamePage() {
       )}
 
       {/* My board (center) */}
-      <div className="flex-1 flex items-center justify-center relative min-h-[360px]">
+      <div className="flex-1 flex items-center justify-center relative min-h-[380px]">
         <div ref={boardRef} className="relative">
           <BoardView
             board={myBoard}
@@ -456,9 +471,9 @@ export default function GamePage() {
               <motion.div
                 key={showScorePop.key}
                 initial={{ y: 0, opacity: 0, scale: 0.5 }}
-                animate={{ y: -80, opacity: 1, scale: 1.3 }}
-                exit={{ y: -120, opacity: 0 }}
-                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none font-display text-5xl font-bold text-neon-cyan"
+                animate={{ y: -100, opacity: 1, scale: 1.4 }}
+                exit={{ y: -150, opacity: 0 }}
+                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none font-display text-6xl font-bold text-neon-cyan"
                 style={{ textShadow: '0 0 30px rgba(34, 211, 238, 1)' }}
               >
                 +{showScorePop.val}
@@ -474,8 +489,8 @@ export default function GamePage() {
                 initial={{ scale: 0, rotate: -20 }}
                 animate={{ scale: 1, rotate: 0 }}
                 exit={{ scale: 0, opacity: 0 }}
-                className="absolute top-2 left-2 pointer-events-none font-display text-2xl font-bold text-yellow-400"
-                style={{ textShadow: '0 0 20px rgba(250, 204, 21, 0.8)' }}
+                className="absolute top-2 left-2 pointer-events-none font-display text-3xl font-bold text-yellow-400"
+                style={{ textShadow: '0 0 25px rgba(250, 204, 21, 0.9)' }}
               >
                 🔥 x{combo}
               </motion.div>
@@ -490,9 +505,9 @@ export default function GamePage() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0 }}
-          className="text-center text-xs text-white/40 mb-2"
+          className="text-center text-xs text-white/50 mb-2"
         >
-          👆 Kéo thả khối bên dưới lên bảng để xếp
+          👆 Giữ khối để kéo lên bảng
         </motion.div>
       )}
 
@@ -502,13 +517,17 @@ export default function GamePage() {
         style={{ touchAction: drag ? 'none' : 'pan-y' }}
       >
         {pieces.map((p, idx) => p ? (
-          <div key={`p-${idx}`} className="flex flex-col items-center gap-1">
+          <motion.div
+            key={`p-${idx}`}
+            animate={{ opacity: drag?.pieceIdx === idx ? 0.2 : 1, scale: drag?.pieceIdx === idx ? 0.9 : 1 }}
+            className="flex flex-col items-center gap-1"
+          >
             <PieceView
               piece={p}
               cellSize={24}
               onPointerDown={(e) => startDrag(idx, e)}
             />
-          </div>
+          </motion.div>
         ) : (
           <div key={`e-${idx}`} className="w-[100px] h-[80px] flex items-center justify-center text-white/20">
             <X size={20} />
@@ -516,18 +535,20 @@ export default function GamePage() {
         ))}
       </div>
 
-      {/* Drag preview (floating piece under cursor) */}
+      {/* DRAG PREVIEW — piece appears ABOVE the finger (real Block Blast style) */}
       {drag && (
         <div
-          className="fixed pointer-events-none z-40"
+          className="fixed pointer-events-none z-50"
           style={{
             left: drag.x,
-            top: drag.y,
-            transform: 'translate(-50%, -50%) scale(1.1)',
-            opacity: 0.9,
+            top: drag.y + DRAG_OFFSET_Y, // ABOVE the finger
+            transform: `translate(-50%, 0) scale(${DRAG_SCALE})`,
+            transformOrigin: '50% 100%', // anchor at bottom center
+            opacity: 0.95,
+            filter: 'drop-shadow(0 8px 16px rgba(0,0,0,0.6))',
           }}
         >
-          <PieceView piece={drag.piece} cellSize={28} ghost />
+          <PieceView piece={drag.piece} cellSize={30} ghost />
         </div>
       )}
 
@@ -536,26 +557,34 @@ export default function GamePage() {
         <div className="space-y-1.5">
           {players
             .slice()
-            .sort((a, b) => b.score - a.score)
-            .map((p, idx) => (
-              <div
-                key={p.id}
-                className={`flex items-center gap-2 text-sm px-2 py-1 rounded-lg ${
-                  p.player_id === playerId ? 'bg-neon-purple/20 text-white font-bold' : 'text-white/80'
-                }`}
-              >
-                <span className="w-6 text-center text-white/40 tabular-nums">{idx + 1}</span>
-                <span className="flex-1 truncate">{p.name}</span>
-                <motion.span
-                  key={p.score}
-                  initial={{ scale: 1.4 }}
-                  animate={{ scale: 1 }}
-                  className="font-bold tabular-nums min-w-[3ch] text-right"
+            .sort((a, b) => {
+              // My score uses local state, others use DB state
+              const aScore = a.player_id === playerId ? myScore : (a.score ?? 0);
+              const bScore = b.player_id === playerId ? myScore : (b.score ?? 0);
+              return bScore - aScore;
+            })
+            .map((p, idx) => {
+              const displayScore = p.player_id === playerId ? myScore : (p.score ?? 0);
+              return (
+                <div
+                  key={p.id}
+                  className={`flex items-center gap-2 text-sm px-2 py-1.5 rounded-lg ${
+                    p.player_id === playerId ? 'bg-neon-purple/20 text-white font-bold' : 'text-white/80'
+                  }`}
                 >
-                  {p.score}
-                </motion.span>
-              </div>
-            ))}
+                  <span className="w-6 text-center text-white/40 tabular-nums font-bold">{idx + 1}</span>
+                  <span className="flex-1 truncate">{p.name}</span>
+                  <motion.span
+                    key={displayScore}
+                    initial={{ scale: 1.4 }}
+                    animate={{ scale: 1 }}
+                    className="font-display font-bold text-base tabular-nums min-w-[3ch] text-right text-neon-cyan"
+                  >
+                    {displayScore}
+                  </motion.span>
+                </div>
+              );
+            })}
         </div>
       </div>
 
