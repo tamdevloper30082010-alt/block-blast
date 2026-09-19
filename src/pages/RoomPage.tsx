@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Copy, Check, Play, Crown, ArrowLeft, LogOut } from 'lucide-react';
+import { Copy, Check, Play, Crown, ArrowLeft, LogOut, Users } from 'lucide-react';
 import { supabase, type Room, type Player } from '../lib/supabase';
 import { getPlayerId } from '../lib/identity';
 import { sfx } from '../lib/audio';
@@ -20,7 +20,6 @@ export default function RoomPage() {
     if (!code) return;
     loadRoom();
 
-    // Subscribe to room + players changes
     const ch = supabase
       .channel(`room-${code}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => loadRoom())
@@ -30,7 +29,6 @@ export default function RoomPage() {
     return () => { supabase.removeChannel(ch); };
   }, [code]);
 
-  // Navigate to game when status becomes 'playing'
   useEffect(() => {
     if (room?.status === 'playing') {
       nav(`/game/${code}`);
@@ -70,7 +68,10 @@ export default function RoomPage() {
 
   const startGame = async () => {
     if (!room || !isHost) return;
-    if (players.length < 1) return;
+    if (players.length < 2) {
+      sfx.error();
+      return;
+    }
     sfx.click();
     const now = new Date();
     const ends = new Date(now.getTime() + room.duration_seconds * 1000);
@@ -89,7 +90,6 @@ export default function RoomPage() {
     if (!room) return;
     sfx.click();
     if (isHost) {
-      // Host leaves → delete room (cascade deletes players)
       await supabase.from('rooms').delete().eq('id', room.id);
     } else {
       await supabase.from('players').delete().eq('room_id', room.id).eq('player_id', playerId);
@@ -118,6 +118,7 @@ export default function RoomPage() {
   }
 
   const minutes = Math.floor(room.duration_seconds / 60);
+  const needed = Math.max(0, (room.max_players || 4) - players.length);
 
   return (
     <div className="min-h-screen p-4 md:p-6 flex flex-col">
@@ -157,7 +158,14 @@ export default function RoomPage() {
         </motion.div>
 
         <div className="card mb-6">
-          <h3 className="text-sm font-medium text-white/60 mb-3">Người chơi ({players.length})</h3>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-medium text-white/80">Người chơi</h3>
+            <div className="flex items-center gap-1.5 text-sm">
+              <Users size={14} className="text-neon-cyan" />
+              <span className="font-bold text-white">{players.length}</span>
+              <span className="text-white/50">/ {room.max_players || 4}</span>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-2">
             {players.map((p, idx) => (
               <motion.div
@@ -176,7 +184,7 @@ export default function RoomPage() {
                 {p.player_id === room.host_id && <Crown size={14} className="text-yellow-400" />}
               </motion.div>
             ))}
-            {Array.from({ length: Math.max(0, 2 - players.length) }).map((_, i) => (
+            {Array.from({ length: needed }).map((_, i) => (
               <div key={`empty-${i}`} className="px-4 py-3 rounded-2xl border border-dashed border-white/10 text-white/30 text-sm flex items-center justify-center">
                 Đang chờ...
               </div>
@@ -184,25 +192,36 @@ export default function RoomPage() {
           </div>
         </div>
 
-        <div className="card mb-6">
+        <div className="card mb-6 space-y-2">
           <div className="flex items-center justify-between text-sm">
             <span className="text-white/60">Thời lượng</span>
             <span className="font-semibold">{minutes} phút</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-white/60">Số người tối đa</span>
+            <span className="font-semibold">{room.max_players || 4} người</span>
           </div>
         </div>
 
         <div className="mt-auto">
           {isHost ? (
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              onClick={startGame}
-              disabled={!amIInRoom}
-              className="w-full btn-primary text-lg py-4 flex items-center justify-center gap-2"
-            >
-              <Play size={20} />
-              Bắt đầu trận đấu
-            </motion.button>
+            <>
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={startGame}
+                disabled={!amIInRoom || players.length < 2}
+                className="w-full btn-primary text-lg py-4 flex items-center justify-center gap-2"
+              >
+                <Play size={20} />
+                Bắt đầu trận đấu {players.length < 2 && `(cần ít nhất 2 người)`}
+              </motion.button>
+              {players.length < 2 && (
+                <p className="text-center text-white/40 text-xs mt-2">
+                  Chờ thêm ít nhất 1 người nữa vào phòng
+                </p>
+              )}
+            </>
           ) : (
             <div className="text-center text-white/50 py-4">
               <div className="animate-pulse">Đang chờ chủ phòng bắt đầu...</div>

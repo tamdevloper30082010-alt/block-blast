@@ -2,6 +2,33 @@
 
 let audioCtx: AudioContext | null = null;
 
+export function initAudio() {
+  if (typeof window === 'undefined') return;
+  if (!audioCtx) {
+    try {
+      audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    } catch {
+      return;
+    }
+  }
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume();
+  }
+}
+
+// Auto-init on first user interaction (any pointer/key event)
+if (typeof window !== 'undefined') {
+  const handler = () => {
+    initAudio();
+    window.removeEventListener('pointerdown', handler);
+    window.removeEventListener('keydown', handler);
+    window.removeEventListener('touchstart', handler);
+  };
+  window.addEventListener('pointerdown', handler, { once: true, passive: true });
+  window.addEventListener('touchstart', handler, { once: true, passive: true });
+  window.addEventListener('keydown', handler, { once: true, passive: true });
+}
+
 function getCtx(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (!audioCtx) {
@@ -11,7 +38,6 @@ function getCtx(): AudioContext | null {
       return null;
     }
   }
-  // Resume context if suspended (user interaction required)
   if (audioCtx.state === 'suspended') {
     audioCtx.resume();
   }

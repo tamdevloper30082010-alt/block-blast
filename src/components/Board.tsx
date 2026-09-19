@@ -17,9 +17,9 @@ type Props = {
 };
 
 const SIZES = {
-  lg: { cell: 44, gap: 2, radius: 8 },
+  lg: { cell: 42, gap: 3, radius: 8 },
   sm: { cell: 28, gap: 1, radius: 6 },
-  xs: { cell: 18, gap: 1, radius: 4 },
+  xs: { cell: 16, gap: 1, radius: 3 },
 };
 
 const PLAYER_COLORS = [
@@ -36,9 +36,7 @@ const PLAYER_COLORS = [
 function colorForCell(value: number, myId: number): string {
   if (value === 0) return 'transparent';
   if (value === myId) return 'url(#myCellGrad)';
-  // Other player — alternate colors deterministically
-  const palette = PLAYER_COLORS;
-  return palette[(value - 1) % palette.length];
+  return PLAYER_COLORS[(value - 1) % PLAYER_COLORS.length];
 }
 
 export default function Board({
@@ -58,12 +56,12 @@ export default function Board({
   const { cell, gap, radius } = SIZES[size];
   const boardSizePx = BOARD_SIZE * cell + (BOARD_SIZE - 1) * gap;
 
-  const ghostMap = new Set<string>();
+  const ghostMap = new Map<string, { color: string }>();
   if (ghost) {
     for (let r = 0; r < ghost.shape.length; r++) {
       for (let c = 0; c < ghost.shape[r].length; c++) {
         if (ghost.shape[r][c]) {
-          ghostMap.add(`${ghost.row + r}:${ghost.col + c}`);
+          ghostMap.set(`${ghost.row + r}:${ghost.col + c}`, { color: ghost.color });
         }
       }
     }
@@ -83,32 +81,56 @@ export default function Board({
 
   return (
     <div
-      className="relative inline-block"
-      style={{ width: boardSizePx, height: boardSizePx }}
+      className="relative inline-block board-container"
+      style={{
+        width: boardSizePx,
+        height: boardSizePx,
+        touchAction: 'none',
+      }}
     >
-      {/* SVG defs for gradients */}
       <svg width="0" height="0" className="absolute">
         <defs>
           <linearGradient id="myCellGrad" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stopColor="#c084fc" />
             <stop offset="1" stopColor="#7c3aed" />
           </linearGradient>
-          <linearGradient id="ghostGrad" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stopColor="#c084fc" stopOpacity="0.5" />
-            <stop offset="1" stopColor="#7c3aed" stopOpacity="0.5" />
-          </linearGradient>
         </defs>
       </svg>
 
+      {/* Background grid (always visible for clarity) */}
       <div
-        className="absolute inset-0 rounded-2xl bg-white/5 border border-white/10"
-        style={{ boxShadow: 'inset 0 0 30px rgba(168, 85, 247, 0.15)' }}
+        className="absolute inset-0 rounded-2xl"
+        style={{
+          background: 'rgba(255,255,255,0.04)',
+          boxShadow: 'inset 0 0 30px rgba(168, 85, 247, 0.15), inset 0 0 1px rgba(255,255,255,0.1)',
+          border: '1px solid rgba(255,255,255,0.08)',
+        }}
       />
+
+      {/* Cell backgrounds for visibility */}
+      {!hideGrid && Array.from({ length: BOARD_SIZE }, (_, r) =>
+        Array.from({ length: BOARD_SIZE }, (_, c) => (
+          <div
+            key={`bg-${r}-${c}`}
+            style={{
+              position: 'absolute',
+              left: c * (cell + gap),
+              top: r * (cell + gap),
+              width: cell,
+              height: cell,
+              borderRadius: radius / 2,
+              background: 'rgba(255,255,255,0.03)',
+            }}
+          />
+        ))
+      )}
+
+      {/* Placed cells + ghost + invalid */}
       {Array.from({ length: BOARD_SIZE }, (_, r) =>
         Array.from({ length: BOARD_SIZE }, (_, c) => {
           const v = board[r][c];
           const key = `${r}:${c}`;
-          const isGhost = ghostMap.has(key);
+          const ghostInfo = ghostMap.get(key);
           const isInvalid = invalidMap.has(key);
           const isClearing = clearingRowSet.has(r) || clearingColSet.has(c);
           const cellColor = colorForCell(v, myId);
@@ -127,37 +149,34 @@ export default function Board({
                 width: cell,
                 height: cell,
                 borderRadius: radius,
+                touchAction: 'none',
               }}
             >
-              {!hideGrid && v === 0 && !isGhost && !isInvalid && (
-                <div
-                  className="absolute inset-0 rounded-md bg-white/[0.03] border border-white/[0.04]"
-                />
-              )}
-
-              {isGhost && !isInvalid && (
+              {ghostInfo && !isInvalid && (
                 <motion.div
-                  initial={{ scale: 0.6, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 0.7 }}
-                  className="absolute inset-0"
+                  initial={{ scale: 0.5, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 0.85 }}
                   style={{
+                    position: 'absolute',
+                    inset: 0,
                     borderRadius: radius,
-                    background: 'url(#ghostGrad)',
-                    backgroundColor: '#a855f7',
-                    boxShadow: '0 0 12px rgba(168, 85, 247, 0.6)',
-                    opacity: 0.5,
+                    backgroundColor: ghostInfo.color,
+                    boxShadow: `0 0 16px ${ghostInfo.color}cc, inset 0 0 8px rgba(255,255,255,0.3)`,
                   }}
                 />
               )}
 
               {isInvalid && (
-                <div
-                  className="absolute inset-0"
+                <motion.div
+                  initial={{ scale: 0.8 }}
+                  animate={{ scale: 1 }}
                   style={{
+                    position: 'absolute',
+                    inset: 0,
                     borderRadius: radius,
                     backgroundColor: '#ef4444',
-                    opacity: 0.5,
-                    boxShadow: '0 0 8px rgba(239, 68, 68, 0.6)',
+                    opacity: 0.7,
+                    boxShadow: '0 0 12px rgba(239, 68, 68, 0.8)',
                   }}
                 />
               )}
@@ -167,20 +186,21 @@ export default function Board({
                   initial={{ scale: 0, opacity: 0 }}
                   animate={
                     isClearing
-                      ? { scale: [1, 1.2, 0], opacity: [1, 1, 0], rotate: [0, 90, 180] }
+                      ? { scale: [1, 1.3, 0], opacity: [1, 1, 0], rotate: [0, 90, 180] }
                       : { scale: 1, opacity: 1 }
                   }
                   transition={
                     isClearing
-                      ? { duration: 0.4, ease: 'easeOut' }
+                      ? { duration: 0.45, ease: 'easeOut' }
                       : { type: 'spring', stiffness: 300, damping: 20 }
                   }
-                  className="absolute inset-0"
                   style={{
+                    position: 'absolute',
+                    inset: 0,
                     borderRadius: radius,
                     background: cellColor,
                     boxShadow: isClearing
-                      ? '0 0 20px rgba(255,255,255,0.9)'
+                      ? '0 0 25px rgba(255,255,255,1), 0 0 50px rgba(255,255,255,0.6)'
                       : `inset 0 0 8px rgba(255,255,255,0.3), 0 2px 4px rgba(0,0,0,0.3)`,
                   }}
                 />

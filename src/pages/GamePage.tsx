@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, Clock, X, Sparkles } from 'lucide-react';
 import { supabase, type Room, type Player } from '../lib/supabase';
 import { getPlayerId } from '../lib/identity';
-import { sfx } from '../lib/audio';
+import { sfx, initAudio } from '../lib/audio';
 import { getRandomPieces, type Piece } from '../lib/pieces';
 import {
   BOARD_SIZE,
@@ -23,6 +23,7 @@ import ParticleEffect, { type Particle as P } from '../components/ParticleEffect
 type DragState = {
   pieceIdx: number;
   piece: Piece;
+  pointerId: number;
   // pointer position (clientX/Y)
   x: number;
   y: number;
@@ -45,9 +46,10 @@ export default function GamePage() {
   const [combo, setCombo] = useState(0);
   const [showScorePop, setShowScorePop] = useState<{ val: number; key: number } | null>(null);
   const [clearing, setClearing] = useState<{ rows: number[]; cols: number[] } | null>(null);
+  const [showHint, setShowHint] = useState(true);
   const boardRef = useRef<HTMLDivElement | null>(null);
-  const cellSize = 44;
-  const gap = 2;
+  const cellSize = 42;
+  const gap = 3;
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const lastSaveRef = useRef(0);
 
@@ -56,6 +58,8 @@ export default function GamePage() {
     if (!code) return;
     loadRoom();
     setPieces(getRandomPieces(3));
+    const t = setTimeout(() => setShowHint(false), 4000);
+    return () => clearTimeout(t);
   }, [code]);
 
   // Subscribe to realtime
@@ -103,7 +107,6 @@ export default function GamePage() {
     const { data } = await supabase.from('players').select('*').eq('room_id', room.id);
     if (data) {
       setPlayers(data);
-      // Update my board if needed
       const me = data.find(p => p.player_id === playerId);
       if (me) setMyBoard(me.board);
     }
@@ -145,11 +148,14 @@ export default function GamePage() {
     setGhostPos({ row: hoverRow, col: hoverCol, valid });
   }, [drag, hoverRow, hoverCol, myBoard]);
 
-  // Pointer move handler
+  // Pointer move/up — registered on window so dragging works anywhere
   useEffect(() => {
     if (!drag) return;
+
     const onMove = (e: PointerEvent) => {
-      setDrag({ ...drag, x: e.clientX, y: e.clientY });
+      if (e.pointerId !== drag.pointerId) return;
+      e.preventDefault();
+      setDrag(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
       const cell = getCellFromPoint(e.clientX, e.clientY);
       if (cell) {
         setHoverRow(cell.row);
@@ -159,7 +165,10 @@ export default function GamePage() {
         setHoverCol(-1);
       }
     };
+
     const onUp = (e: PointerEvent) => {
+      if (e.pointerId !== drag.pointerId) return;
+      e.preventDefault();
       const cell = getCellFromPoint(e.clientX, e.clientY);
       if (cell) {
         attemptPlace(drag.pieceIdx, cell.row, cell.col);
@@ -171,19 +180,38 @@ export default function GamePage() {
       setHoverRow(-1);
       setHoverCol(-1);
     };
+
+    // Prevent page scroll on mobile during drag
+    const preventTouch = (e: TouchEvent) => {
+      if (drag) e.preventDefault();
+    };
+    document.addEventListener('touchmove', preventTouch, { passive: false });
+
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+
     return () => {
+      document.removeEventListener('touchmove', preventTouch);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
     };
-  }, [drag]);
+  }, [drag, getCellFromPoint]);
 
   function startDrag(pieceIdx: number, e: React.PointerEvent) {
+    e.preventDefault();
+    initAudio();
     const piece = pieces[pieceIdx];
     if (!piece) return;
     sfx.pickup();
-    setDrag({ pieceIdx, piece, x: e.clientX, y: e.clientY });
+    setDrag({
+      pieceIdx,
+      piece,
+      pointerId: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+    });
   }
 
   async function attemptPlace(pieceIdx: number, row: number, col: number) {
@@ -196,11 +224,9 @@ export default function GamePage() {
 
     sfx.place();
 
-    // Place piece
     const placed = placeOnBoard(myBoard, piece, row, col, myPlayerNum || 1);
     const blocksPlaced = piece.shape.flat().filter(v => v === 1).length;
 
-    // Find lines
     const { rows, cols } = findFullLines(placed);
 
     let finalBoard = placed;
@@ -210,13 +236,9 @@ export default function GamePage() {
     if (rows.length > 0 || cols.length > 0) {
       newCombo = combo + 1;
       setCombo(newCombo);
-      // Show clearing animation
       setClearing({ rows, cols });
-      setTimeout(() => {
-        setClearing(null);
-      }, 400);
+      setTimeout(() => setClearing(null), 450);
 
-      // Play sound
       if (rows.length + cols.length >= 2) {
         sfx.bigClear();
         if (newCombo >= 2) sfx.combo();
@@ -224,46 +246,38 @@ export default function GamePage() {
         sfx.clear();
       }
 
-      // Spawn particles
       spawnParticles(rows, cols);
 
-      // Clear lines after animation
       setTimeout(() => {
         finalBoard = clearLines(placed, rows, cols);
         setMyBoard(finalBoard);
         saveState(finalBoard, scoreGained, newCombo);
-      }, 350);
+      }, 380);
     } else {
       setCombo(0);
       setMyBoard(placed);
       saveState(placed, scoreGained, 0);
     }
 
-    // Show score pop
     setShowScorePop({ val: scoreGained, key: Date.now() });
     setTimeout(() => setShowScorePop(null), 1000);
 
-    // Remove piece
     const newPieces = [...pieces];
     newPieces[pieceIdx] = null as any;
     setPieces(newPieces);
 
-    // Check if all 3 used → generate new 3
     if (newPieces.every(p => !p)) {
       setTimeout(() => {
         setPieces(getRandomPieces(3));
         setCombo(0);
-      }, 350);
+      }, 380);
     } else {
-      // Check if game over (can't place remaining)
       setTimeout(() => {
         const remaining = newPieces.filter(p => p);
         if (remaining.length > 0 && !canPlaceAny(finalBoard, remaining)) {
-          // Can't place any remaining piece → mark player as dead but stay in game
-          // (they can still spectate)
           saveState(finalBoard, 0, 0, true);
         }
-      }, 400);
+      }, 450);
     }
   }
 
@@ -274,7 +288,6 @@ export default function GamePage() {
     const boardRect = boardRef.current?.getBoundingClientRect();
     if (!boardRect) return;
 
-    // Particles from cleared rows
     rows.forEach(r => {
       for (let c = 0; c < BOARD_SIZE; c++) {
         const x = boardRect.left + c * (cellSize + gap) + cellSize / 2;
@@ -292,7 +305,6 @@ export default function GamePage() {
         }
       }
     });
-    // Particles from cleared cols
     cols.forEach(c => {
       for (let r = 0; r < BOARD_SIZE; r++) {
         const x = boardRect.left + c * (cellSize + gap) + cellSize / 2;
@@ -317,11 +329,10 @@ export default function GamePage() {
     setParticles(prev => prev.filter(p => p.id !== id));
   };
 
-  // Debounced save to DB
   async function saveState(board: number[][], scoreDelta: number, newCombo: number, dead = false) {
     if (!room || !myPlayer) return;
     const now = Date.now();
-    if (now - lastSaveRef.current < 150) return; // throttle
+    if (now - lastSaveRef.current < 150) return;
     lastSaveRef.current = now;
 
     const newScore = myPlayer.score + scoreDelta;
@@ -334,7 +345,6 @@ export default function GamePage() {
     }).eq('id', myPlayer.id);
   }
 
-  // Time formatting
   const mm = Math.floor(timeLeft / 60);
   const ss = timeLeft % 60;
   const timeStr = `${mm}:${ss.toString().padStart(2, '0')}`;
@@ -348,7 +358,10 @@ export default function GamePage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col p-3 md:p-4 max-w-2xl mx-auto w-full select-none">
+    <div
+      className="min-h-screen flex flex-col p-3 md:p-4 max-w-2xl mx-auto w-full select-none"
+      style={{ touchAction: drag ? 'none' : 'pan-y' }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
@@ -376,19 +389,26 @@ export default function GamePage() {
       {/* Opponents area (top) */}
       {otherPlayers.length > 0 && (
         <div className="mb-3">
-          <p className="text-xs text-white/40 mb-1.5 flex items-center gap-1.5">
+          <p className="text-xs text-white/50 mb-1.5 flex items-center gap-1.5 font-medium">
             <Sparkles size={12} />
-            Đối thủ đang xếp
+            Đối thủ ({otherPlayers.length})
           </p>
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {otherPlayers.slice(0, 4).map(p => (
-              <div key={p.id} className="glass rounded-2xl p-2 flex-shrink-0">
-                <div className="flex items-center justify-between mb-1 text-xs">
-                  <span className="font-medium text-white/80 truncate max-w-[60px]">{p.name}</span>
-                  <span className="font-bold text-neon-cyan">{p.score}</span>
+            {otherPlayers.map(p => (
+              <div key={p.id} className="glass rounded-2xl p-2 flex-shrink-0 min-w-[100px]">
+                <div className="flex items-center justify-between mb-1.5 gap-2">
+                  <span className="font-semibold text-white text-xs truncate max-w-[80px]">{p.name}</span>
+                  <motion.span
+                    key={p.score}
+                    initial={{ scale: 1.4 }}
+                    animate={{ scale: 1 }}
+                    className="font-display font-bold text-base text-neon-cyan tabular-nums"
+                  >
+                    {p.score}
+                  </motion.span>
                 </div>
                 <BoardView
-                  board={p.board || createEmptyBoard()}
+                  board={p.board && p.board.length > 0 ? p.board : createEmptyBoard()}
                   myId={myPlayerNum || 1}
                   size="xs"
                   hideGrid
@@ -399,8 +419,19 @@ export default function GamePage() {
         </div>
       )}
 
+      {/* Hint when no opponents yet */}
+      {otherPlayers.length === 0 && (
+        <div className="mb-3 glass rounded-2xl p-3 text-center text-sm text-white/60">
+          <div className="flex items-center justify-center gap-2">
+            <Sparkles size={14} className="text-neon-cyan" />
+            <span>Đang chờ người chơi khác vào phòng...</span>
+          </div>
+          <p className="text-xs text-white/40 mt-1">Mã phòng: <span className="font-mono font-bold">{code}</span></p>
+        </div>
+      )}
+
       {/* My board (center) */}
-      <div className="flex-1 flex items-center justify-center relative">
+      <div className="flex-1 flex items-center justify-center relative min-h-[360px]">
         <div ref={boardRef} className="relative">
           <BoardView
             board={myBoard}
@@ -425,20 +456,51 @@ export default function GamePage() {
               <motion.div
                 key={showScorePop.key}
                 initial={{ y: 0, opacity: 0, scale: 0.5 }}
-                animate={{ y: -80, opacity: 1, scale: 1.2 }}
+                animate={{ y: -80, opacity: 1, scale: 1.3 }}
                 exit={{ y: -120, opacity: 0 }}
-                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none font-display text-4xl font-bold text-neon-cyan"
-                style={{ textShadow: '0 0 20px rgba(34, 211, 238, 0.8)' }}
+                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none font-display text-5xl font-bold text-neon-cyan"
+                style={{ textShadow: '0 0 30px rgba(34, 211, 238, 1)' }}
               >
                 +{showScorePop.val}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Combo indicator */}
+          <AnimatePresence>
+            {combo >= 2 && (
+              <motion.div
+                key={combo}
+                initial={{ scale: 0, rotate: -20 }}
+                animate={{ scale: 1, rotate: 0 }}
+                exit={{ scale: 0, opacity: 0 }}
+                className="absolute top-2 left-2 pointer-events-none font-display text-2xl font-bold text-yellow-400"
+                style={{ textShadow: '0 0 20px rgba(250, 204, 21, 0.8)' }}
+              >
+                🔥 x{combo}
               </motion.div>
             )}
           </AnimatePresence>
         </div>
       </div>
 
+      {/* First-time hint */}
+      {showHint && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          className="text-center text-xs text-white/40 mb-2"
+        >
+          👆 Kéo thả khối bên dưới lên bảng để xếp
+        </motion.div>
+      )}
+
       {/* Pieces tray */}
-      <div className="my-3 flex items-end justify-center gap-6 min-h-[100px]">
+      <div
+        className="my-3 flex items-end justify-center gap-6 min-h-[100px]"
+        style={{ touchAction: drag ? 'none' : 'pan-y' }}
+      >
         {pieces.map((p, idx) => p ? (
           <div key={`p-${idx}`} className="flex flex-col items-center gap-1">
             <PieceView
@@ -478,13 +540,20 @@ export default function GamePage() {
             .map((p, idx) => (
               <div
                 key={p.id}
-                className={`flex items-center gap-2 text-sm ${
-                  p.player_id === playerId ? 'text-neon-purple font-bold' : 'text-white/70'
+                className={`flex items-center gap-2 text-sm px-2 py-1 rounded-lg ${
+                  p.player_id === playerId ? 'bg-neon-purple/20 text-white font-bold' : 'text-white/80'
                 }`}
               >
-                <span className="w-5 text-center text-white/40">{idx + 1}.</span>
+                <span className="w-6 text-center text-white/40 tabular-nums">{idx + 1}</span>
                 <span className="flex-1 truncate">{p.name}</span>
-                <span className="font-bold tabular-nums">{p.score}</span>
+                <motion.span
+                  key={p.score}
+                  initial={{ scale: 1.4 }}
+                  animate={{ scale: 1 }}
+                  className="font-bold tabular-nums min-w-[3ch] text-right"
+                >
+                  {p.score}
+                </motion.span>
               </div>
             ))}
         </div>

@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Users } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { generateRoomCode } from '../lib/gameLogic';
 import { getPlayerId, getDisplayName, setDisplayName } from '../lib/identity';
 import { sfx } from '../lib/audio';
+import { initAudio } from '../lib/audio';
 
 const DURATIONS = [
   { label: '1 phút', value: 60 },
@@ -14,14 +15,18 @@ const DURATIONS = [
   { label: '5 phút', value: 300 },
 ];
 
+const PLAYER_COUNTS = [2, 3, 4];
+
 export default function CreateRoomPage() {
   const nav = useNavigate();
   const [name, setName] = useState(getDisplayName());
   const [duration, setDuration] = useState(180);
+  const [maxPlayers, setMaxPlayers] = useState(4);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const create = async () => {
+    initAudio(); // unlock audio on user gesture
     if (!name.trim()) {
       setError('Vui lòng nhập tên');
       sfx.error();
@@ -34,7 +39,6 @@ export default function CreateRoomPage() {
 
     const playerId = getPlayerId();
 
-    // Try a few times in case of code collision
     let attempts = 0;
     while (attempts < 5) {
       const code = generateRoomCode();
@@ -45,6 +49,7 @@ export default function CreateRoomPage() {
           host_name: name.trim(),
           host_id: playerId,
           duration_seconds: duration,
+          max_players: maxPlayers,
           status: 'waiting',
         })
         .select()
@@ -52,7 +57,6 @@ export default function CreateRoomPage() {
 
       if (roomErr) {
         if (roomErr.code === '23505') {
-          // unique violation, retry
           attempts++;
           continue;
         }
@@ -62,7 +66,6 @@ export default function CreateRoomPage() {
         return;
       }
 
-      // Insert host as first player
       const emptyBoard = Array.from({ length: 8 }, () => Array(8).fill(0));
       const { error: playerErr } = await supabase.from('players').insert({
         room_id: room.id,
@@ -80,7 +83,6 @@ export default function CreateRoomPage() {
         return;
       }
 
-      // Persist host identity for the room page
       sessionStorage.setItem(`bba.roomHost.${room.id}`, '1');
       nav(`/room/${room.code}`);
       return;
@@ -123,6 +125,29 @@ export default function CreateRoomPage() {
             </div>
 
             <div>
+              <label className="text-sm text-white/60 mb-2 font-medium flex items-center gap-1.5">
+                <Users size={14} />
+                Số người chơi
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {PLAYER_COUNTS.map(n => (
+                  <motion.button
+                    key={n}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => { setMaxPlayers(n); sfx.click(); }}
+                    className={`py-3 rounded-2xl font-semibold transition-all ${
+                      maxPlayers === n
+                        ? 'bg-gradient-to-r from-neon-purple to-neon-pink text-white shadow-[0_0_20px_rgba(168,85,247,0.5)]'
+                        : 'bg-white/5 hover:bg-white/10 text-white/70 border border-white/10'
+                    }`}
+                  >
+                    {n} người
+                  </motion.button>
+                ))}
+              </div>
+            </div>
+
+            <div>
               <label className="block text-sm text-white/60 mb-2 font-medium">Thời lượng trận đấu</label>
               <div className="grid grid-cols-4 gap-2">
                 {DURATIONS.map(d => (
@@ -132,7 +157,7 @@ export default function CreateRoomPage() {
                     onClick={() => { setDuration(d.value); sfx.click(); }}
                     className={`py-3 rounded-2xl font-semibold transition-all ${
                       duration === d.value
-                        ? 'bg-gradient-to-r from-neon-purple to-neon-pink text-white shadow-[0_0_20px_rgba(168,85,247,0.5)]'
+                        ? 'bg-gradient-to-r from-neon-cyan to-neon-purple text-white shadow-[0_0_20px_rgba(34,211,238,0.5)]'
                         : 'bg-white/5 hover:bg-white/10 text-white/70 border border-white/10'
                     }`}
                   >

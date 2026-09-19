@@ -15,30 +15,41 @@ export default function PieceView({ piece, cellSize = 22, ghost = false, onPoint
   const w = cols * cellSize;
   const h = rows * cellSize;
 
+  // Defensive color — fall back to purple if missing
+  const color = piece?.color || '#a855f7';
+
   return (
     <motion.div
-      whileTap={disabled ? {} : { scale: 1.1 }}
+      whileTap={disabled || ghost ? {} : { scale: 1.05 }}
       draggable={false}
       onPointerDown={disabled ? undefined : onPointerDown}
-      className={`relative inline-block select-none ${disabled ? 'opacity-30' : 'cursor-grab active:cursor-grabbing'}`}
-      style={{ width: w, height: h }}
+      className={`piece ${disabled ? 'piece-disabled' : ''} ${ghost ? 'piece-ghost' : ''}`}
+      style={{
+        width: w,
+        height: h,
+        touchAction: 'none',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        position: 'relative',
+      }}
     >
       {Array.from({ length: rows }, (_, r) =>
         Array.from({ length: cols }, (_, c) =>
           piece.shape[r][c] ? (
             <div
               key={`${r}-${c}`}
-              className="absolute"
               style={{
+                position: 'absolute',
                 left: c * cellSize,
                 top: r * cellSize,
                 width: cellSize - 2,
                 height: cellSize - 2,
-                borderRadius: 4,
-                backgroundColor: ghost ? `${piece.color}55` : piece.color,
+                borderRadius: 5,
+                backgroundColor: color,
                 boxShadow: ghost
                   ? 'none'
-                  : `inset 0 0 6px rgba(255,255,255,0.4), 0 2px 4px rgba(0,0,0,0.3), 0 0 8px ${piece.color}66`,
+                  : `inset 0 0 8px rgba(255,255,255,0.45), 0 2px 4px rgba(0,0,0,0.35), 0 0 10px ${color}99`,
+                opacity: ghost ? 0.5 : 1,
               }}
             />
           ) : null
