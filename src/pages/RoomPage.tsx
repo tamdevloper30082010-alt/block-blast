@@ -1,10 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Copy, Check, Play, Crown, ArrowLeft, LogOut, Users } from 'lucide-react';
+import { Copy, Check, Play, Crown, ArrowLeft, LogOut, Users, Gamepad2 } from 'lucide-react';
 import { supabase, type Room, type Player } from '../lib/supabase';
 import { getPlayerId } from '../lib/identity';
 import { sfx } from '../lib/audio';
+import { shuffleDeck, dealCards, generateSeed } from '../lib/tienlen/cards';
 
 export default function RoomPage() {
   const { code } = useParams<{ code: string }>();
@@ -31,9 +32,10 @@ export default function RoomPage() {
 
   useEffect(() => {
     if (room?.status === 'playing') {
-      nav(`/game/${code}`);
+      const target = room.game_type === 'tienlen' ? `/game/tl/${code}` : `/game/${code}`;
+      nav(target);
     }
-  }, [room?.status, code, nav]);
+  }, [room?.status, code, nav, room?.game_type]);
 
   async function loadRoom() {
     const { data: roomData, error: roomErr } = await supabase
@@ -68,20 +70,59 @@ export default function RoomPage() {
 
   const startGame = async () => {
     if (!room || !isHost) return;
-    if (players.length < 2) {
+    const isTienLen = room.game_type === 'tienlen';
+    const minPlayers = isTienLen ? 2 : 2;
+    if (players.length < minPlayers) {
       sfx.error();
       return;
     }
     sfx.click();
-    const now = new Date();
-    const ends = new Date(now.getTime() + room.duration_seconds * 1000);
+
+    let updateData: any = { status: 'playing' };
+
+    if (isTienLen) {
+      // Initialize Tiến Lên game state
+      const seed = generateSeed();
+      const deck = shuffleDeck(seed);
+      const hands = dealCards(deck, players.length);
+      const handsMap: Record<string, any> = {};
+      players.forEach((p, idx) => {
+        handsMap[p.player_id] = hands[idx];
+      });
+
+      // First player: the one who has 3♠ (Vietnamese rule)
+      let firstPlayerIdx = 0;
+      const threeSpades = '3-♠';
+      for (let i = 0; i < hands.length; i++) {
+        if (hands[i].find(c => c.id === threeSpades)) {
+          firstPlayerIdx = i;
+          break;
+        }
+      }
+
+      updateData.started_at = new Date().toISOString();
+      updateData.ends_at = null;
+      updateData.game_state = {
+        deckSeed: seed,
+        hands: handsMap,
+        turnOrder: players.map(p => p.player_id),
+        currentTurn: players[firstPlayerIdx].player_id,
+        currentPlay: null,
+        passCount: 0,
+        winner: null,
+        lastWinner: players[firstPlayerIdx].player_id,
+        startedAt: Date.now(),
+      };
+    } else {
+      const now = new Date();
+      const ends = new Date(now.getTime() + room.duration_seconds * 1000);
+      updateData.started_at = now.toISOString();
+      updateData.ends_at = ends.toISOString();
+    }
+
     const { error } = await supabase
       .from('rooms')
-      .update({
-        status: 'playing',
-        started_at: now.toISOString(),
-        ends_at: ends.toISOString(),
-      })
+      .update(updateData)
       .eq('id', room.id);
     if (error) setError(error.message);
   };
@@ -119,6 +160,7 @@ export default function RoomPage() {
 
   const minutes = Math.floor(room.duration_seconds / 60);
   const needed = Math.max(0, (room.max_players || 4) - players.length);
+  const isTienLen = room.game_type === 'tienlen';
 
   return (
     <div className="min-h-screen p-4 md:p-6 flex flex-col">
@@ -139,25 +181,31 @@ export default function RoomPage() {
         <motion.div
           initial={{ y: 20, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
-          className="card text-center mb-6"
+          className="card text-center mb-4"
         >
-          <p className="text-white/50 text-sm mb-2">Mã phòng</p>
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <Gamepad2 size={14} className="text-neon-cyan" />
+            <span className="text-xs text-white/50 uppercase tracking-wider">
+              {isTienLen ? 'Tiến Lên' : 'Block Blast'}
+            </span>
+          </div>
+          <p className="text-white/50 text-xs mb-1">Mã phòng</p>
           <button
             onClick={copyCode}
             className="font-display text-5xl font-bold tracking-[0.3em] mb-3 hover:text-neon-purple transition-colors"
           >
             {code}
           </button>
-          <div className="flex items-center justify-center gap-2 text-sm text-white/50">
+          <div className="flex items-center justify-center gap-2 text-xs text-white/50">
             {copied ? (
-              <><Check size={14} className="text-green-400" /><span className="text-green-400">Đã copy</span></>
+              <><Check size={12} className="text-green-400" /><span className="text-green-400">Đã copy</span></>
             ) : (
-              <><Copy size={14} /><span>Bấm để copy và gửi cho bạn bè</span></>
+              <><Copy size={12} /><span>Bấm để copy và gửi cho bạn bè</span></>
             )}
           </div>
         </motion.div>
 
-        <div className="card mb-6">
+        <div className="card mb-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-medium text-white/80">Người chơi</h3>
             <div className="flex items-center gap-1.5 text-sm">
@@ -192,15 +240,23 @@ export default function RoomPage() {
           </div>
         </div>
 
-        <div className="card mb-6 space-y-2">
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-white/60">Thời lượng</span>
-            <span className="font-semibold">{minutes} phút</span>
-          </div>
+        <div className="card mb-4 space-y-2">
+          {!isTienLen && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-white/60">Thời lượng</span>
+              <span className="font-semibold">{minutes} phút</span>
+            </div>
+          )}
           <div className="flex items-center justify-between text-sm">
             <span className="text-white/60">Số người tối đa</span>
             <span className="font-semibold">{room.max_players || 4} người</span>
           </div>
+          {isTienLen && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-white/60">Luật chơi</span>
+              <span className="font-semibold text-xs">Hết bài đầu tiên thắng</span>
+            </div>
+          )}
         </div>
 
         <div className="mt-auto">
@@ -214,7 +270,7 @@ export default function RoomPage() {
                 className="w-full btn-primary text-lg py-4 flex items-center justify-center gap-2"
               >
                 <Play size={20} />
-                Bắt đầu trận đấu {players.length < 2 && `(cần ít nhất 2 người)`}
+                Bắt đầu {players.length < 2 && `(cần ${isTienLen ? '2' : '2'} người)`}
               </motion.button>
               {players.length < 2 && (
                 <p className="text-center text-white/40 text-xs mt-2">

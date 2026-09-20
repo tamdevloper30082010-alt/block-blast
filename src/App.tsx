@@ -5,6 +5,8 @@ import JoinRoomPage from './pages/JoinRoomPage';
 import RoomPage from './pages/RoomPage';
 import GamePage from './pages/GamePage';
 import ResultsPage from './pages/ResultsPage';
+import TienLenGamePage from './pages/TienLenGamePage';
+import TienLenResultsPage from './pages/TienLenResultsPage';
 
 export default function App() {
   return (
@@ -16,6 +18,8 @@ export default function App() {
         <Route path="/room/:code" element={<RoomPage />} />
         <Route path="/game/:code" element={<GamePage />} />
         <Route path="/results/:code" element={<ResultsPage />} />
+        <Route path="/game/tl/:code" element={<TienLenGamePage />} />
+        <Route path="/tl-results/:code" element={<TienLenResultsPage />} />
       </Routes>
     </HashRouter>
   );
