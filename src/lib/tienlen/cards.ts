@@ -59,6 +59,10 @@ export function shuffleDeck(seed: number): Card[] {
 }
 
 export function dealCards(deck: Card[], playerCount: number): Card[][] {
+  // Standard Tiến Lên dealing:
+  //  - 2 players: 26 cards each
+  //  - 3 players: 18-17-17 (extra card goes to first player after round-robin)
+  //  - 4 players: 13 each
   const hands: Card[][] = Array.from({ length: playerCount }, () => []);
   for (let i = 0; i < deck.length; i++) {
     hands[i % playerCount].push(deck[i]);

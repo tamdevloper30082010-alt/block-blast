@@ -253,8 +253,12 @@ export default function TienLenGamePage() {
       </div>
 
       {/* Opponents */}
-      <div className="mb-3 grid grid-cols-3 gap-2">
-        {opponents.slice(0, 3).map(p => {
+      <div className={`mb-3 grid gap-2 ${
+        opponents.length === 1 ? 'grid-cols-1 max-w-[280px] mx-auto' :
+        opponents.length === 2 ? 'grid-cols-2' :
+        'grid-cols-3'
+      }`}>
+        {opponents.map(p => {
           const hand = state.hands[p.player_id] || [];
           const isCurrentTurn = p.player_id === state.currentTurn;
           return (
@@ -269,15 +273,15 @@ export default function TienLenGamePage() {
                 <span className="font-bold text-white text-xs truncate">{p.name}</span>
                 <span className="font-display font-bold text-sm text-neon-cyan">{hand.length}</span>
               </div>
-              <div className="flex -space-x-3">
-                {hand.slice(0, 5).map((c, i) => (
-                  <div key={c.id} style={{ zIndex: 5 - i }}>
+              <div className="flex -space-x-4">
+                {hand.slice(0, Math.min(hand.length, 7)).map((c, i) => (
+                  <div key={c.id} style={{ zIndex: 7 - i }}>
                     <CardView card={c} faceDown small />
                   </div>
                 ))}
-                {hand.length > 5 && (
+                {hand.length > 7 && (
                   <div className="w-8 h-11 rounded-lg bg-white/10 border border-white/20 flex items-center justify-center text-xs text-white/60 font-bold">
-                    +{hand.length - 5}
+                    +{hand.length - 7}
                   </div>
                 )}
               </div>
