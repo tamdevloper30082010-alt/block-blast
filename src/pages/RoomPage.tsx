@@ -72,7 +72,8 @@ export default function RoomPage() {
   const startGame = async () => {
     if (!room || !isHost) return;
     const isTienLen = room.game_type === 'tienlen';
-    const minPlayers = 2;
+    const botCount = parseInt(sessionStorage.getItem(`bba.botCount.${room.id}`) || '0', 10);
+    const minPlayers = botCount > 0 ? 1 : 2;
     if (players.length < minPlayers) {
       sfx.error();
       return;
@@ -80,7 +81,6 @@ export default function RoomPage() {
     sfx.click();
 
     // Insert bot players if requested
-    const botCount = parseInt(sessionStorage.getItem(`bba.botCount.${room.id}`) || '0', 10);
     const botPlayers: Player[] = [];
     if (botCount > 0) {
       for (let i = 0; i < botCount; i++) {
@@ -303,17 +303,35 @@ export default function RoomPage() {
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={startGame}
-                disabled={!amIInRoom || players.length < 2}
+                disabled={!amIInRoom || players.length < (parseInt(sessionStorage.getItem(`bba.botCount.${room.id}`) || '0', 10) > 0 ? 1 : 2)}
                 className="w-full btn-primary text-lg py-4 flex items-center justify-center gap-2"
               >
                 <Play size={20} />
-                Bắt đầu {players.length < 2 && `(cần ${isTienLen ? '2' : '2'} người)`}
+                Bắt đầu {(() => {
+                  const bc = parseInt(sessionStorage.getItem(`bba.botCount.${room.id}`) || '0', 10);
+                  if (bc > 0 && players.length < 2) return '(có thể chơi với bot)';
+                  return '';
+                })()}
               </motion.button>
-              {players.length < 2 && (
-                <p className="text-center text-white/40 text-xs mt-2">
-                  Chờ thêm ít nhất 1 người nữa vào phòng
-                </p>
-              )}
+              {(() => {
+                const bc = parseInt(sessionStorage.getItem(`bba.botCount.${room.id}`) || '0', 10);
+                if (bc > 0) {
+                  return (
+                    <p className="text-center text-neon-cyan/80 text-xs mt-2 flex items-center justify-center gap-1.5">
+                      <Bot size={12} />
+                      Sẽ thêm {bc} bot — bắt đầu được luôn không cần chờ người
+                    </p>
+                  );
+                }
+                if (players.length < 2) {
+                  return (
+                    <p className="text-center text-white/40 text-xs mt-2">
+                      Chờ thêm ít nhất 1 người nữa vào phòng
+                    </p>
+                  );
+                }
+                return null;
+              })()}
             </>
           ) : (
             <div className="text-center text-white/50 py-4">
