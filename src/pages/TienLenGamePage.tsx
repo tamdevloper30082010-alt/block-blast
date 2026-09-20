@@ -144,19 +144,13 @@ export default function TienLenGamePage() {
     setError('');
   }
 
-  async function passTurn() {
-    if (!isMyTurn || winner || !state || !room) return;
-    if (!state.currentPlay) {
-      // Can't pass if no one has played yet
-      sfx.error();
-      setError('Chưa có ai đánh, không thể bỏ lượt');
-      setTimeout(() => setError(''), 2000);
-      return;
-    }
+  async function executePass(forPlayerId: string) {
+    if (!state || !room) return;
+    if (!state.currentPlay) return; // can't pass on new round
 
     sfx.click();
     const newPassCount = state.passCount + 1;
-    let newCurrentTurn = nextPlayerId(state, playerId);
+    let newCurrentTurn = nextPlayerId(state, forPlayerId);
     let newCurrentPlay: TienLenPlay | null = state.currentPlay;
     let newLastWinner = state.lastWinner;
 
@@ -181,6 +175,18 @@ export default function TienLenGamePage() {
     }).eq('id', room.id);
   }
 
+  async function passTurn() {
+    if (!isMyTurn || winner || !state || !room) return;
+    if (!state.currentPlay) {
+      // Can't pass if no one has played yet
+      sfx.error();
+      setError('Chưa có ai đánh, không thể bỏ lượt');
+      setTimeout(() => setError(''), 2000);
+      return;
+    }
+    await executePass(playerId);
+  }
+
   function nextPlayerId(s: TienLenState, current: string): string | null {
     const idx = s.turnOrder.indexOf(current);
     if (idx === -1) return null;
@@ -197,20 +203,34 @@ export default function TienLenGamePage() {
   // BOT ENGINE — host runs bots on their turn
   useEffect(() => {
     if (!state || !room || !isHost || winner) return;
-    const currentPlayer = players.find(p => p.player_id === state.currentTurn);
+    const botId = state.currentTurn;
+    if (!botId) return;
+    const currentPlayer = players.find(p => p.player_id === botId);
     if (!currentPlayer?.is_bot) return;
+    if (!state.hands[botId] || state.hands[botId].length === 0) return;
 
     const timeout = setTimeout(async () => {
-      const decision = botDecideMove(state, state.currentTurn!);
-      if (decision.action === 'pass') {
-        await passTurn();
-      } else if (decision.cards) {
-        await botPlayCards(decision.cards);
+      try {
+        const decision = botDecideMove(state, botId);
+        if (decision.action === 'pass') {
+          await executePass(botId);
+        } else if (decision.cards && decision.cards.length > 0) {
+          await botPlayCards(decision.cards);
+        }
+      } catch (err) {
+        console.error('Bot error:', err);
       }
-    }, 1500 + Math.random() * 1000); // 1.5-2.5s delay
+    }, 1500 + Math.random() * 1000);
 
     return () => clearTimeout(timeout);
   }, [state?.currentTurn, isHost, winner, players.length]);
+
+  const isBotThinking = useMemo(() => {
+    if (!state || !isHost || winner) return false;
+    const cur = state.currentTurn;
+    if (!cur) return false;
+    return players.find(p => p.player_id === cur)?.is_bot ?? false;
+  }, [state?.currentTurn, players, isHost, winner]);
 
   async function botPlayCards(cards: Card[]) {
     if (!state || !room || !playerId) return;
@@ -218,7 +238,8 @@ export default function TienLenGamePage() {
     if (!botId) return;
     const combo = detectCombination(cards);
     if (!combo) {
-      await passTurn();
+      // Invalid combo, just pass instead
+      await executePass(botId);
       return;
     }
 
@@ -309,8 +330,9 @@ export default function TienLenGamePage() {
         </button>
         <div className="glass rounded-full px-4 py-1.5 flex items-center gap-2">
           <span className="text-xs text-white/60">Lượt của:</span>
+          {isBotThinking && <Bot size={12} className="text-neon-cyan animate-pulse" />}
           <span className={`font-bold text-sm ${isMyTurn ? 'text-neon-cyan animate-pulse' : 'text-white'}`}>
-            {currentPlayer?.name || '...'}
+            {isBotThinking ? 'Bot đang suy nghĩ...' : (currentPlayer?.name || '...')}
           </span>
         </div>
         <div className="text-xs text-white/40 font-mono">{code}</div>

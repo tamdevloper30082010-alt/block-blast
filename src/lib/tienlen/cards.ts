@@ -10,7 +10,7 @@ export type Card = {
 };
 
 const SUITS: Suit[] = ['♠', '♥', '♦', '♣'];
-const RANKS: Rank[] = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2'];
+export const RANKS: Rank[] = ['3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', '2'];
 
 // Numerical rank value: 3=0, 4=1, ..., A=11, 2=12
 export function rankValue(rank: Rank): number {
