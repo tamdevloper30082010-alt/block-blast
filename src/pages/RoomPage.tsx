@@ -84,11 +84,17 @@ export default function RoomPage() {
     const botPlayers: Player[] = [];
     if (botCount > 0) {
       for (let i = 0; i < botCount; i++) {
-        const botId = `00000000-0000-0000-0000-b00${String(i).padStart(4, '0')}`.slice(0, 36);
+        // Generate a VALID UUID (36-char format)
+        const botId = (typeof crypto !== 'undefined' && (crypto as any).randomUUID)
+          ? (crypto as any).randomUUID()
+          : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+              const r = (Math.random() * 16) | 0;
+              return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+            });
         const botName = `Bot ${i + 1}`;
         const emptyBoard = Array.from({ length: 8 }, () => Array(8).fill(0));
         const initialPieces = isTienLen ? null : getRandomPieces(3);
-        const { data } = await supabase.from('players').insert({
+        const { data, error: botErr } = await supabase.from('players').insert({
           room_id: room.id,
           player_id: botId,
           name: botName,
@@ -98,6 +104,11 @@ export default function RoomPage() {
           is_bot: true,
           pieces: initialPieces,
         }).select().single();
+        if (botErr) {
+          setError(`Không thể tạo bot: ${botErr.message}`);
+          sfx.error();
+          return;
+        }
         if (data) botPlayers.push(data);
       }
     }
