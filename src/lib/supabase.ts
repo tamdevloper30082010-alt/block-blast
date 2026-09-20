@@ -36,6 +36,8 @@ export type Player = {
   board: number[][];
   is_alive: boolean;
   combo: number;
+  is_bot: boolean;
+  pieces: any[] | null;
   last_active_at: string;
   joined_at: string;
 };

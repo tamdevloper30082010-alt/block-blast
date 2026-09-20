@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Clock, X, Sparkles } from 'lucide-react';
+import { Trophy, Clock, X, Sparkles, Bot } from 'lucide-react';
 import { supabase, type Room, type Player } from '../lib/supabase';
 import { getPlayerId } from '../lib/identity';
 import { sfx, initAudio } from '../lib/audio';
@@ -19,6 +19,7 @@ import {
 import BoardView from '../components/Board';
 import PieceView from '../components/Piece';
 import ParticleEffect, { type Particle as P } from '../components/ParticleEffect';
+import { useBlockBlastBotEngine } from '../hooks/useBlockBlastBotEngine';
 
 type DragState = {
   pieceIdx: number;
@@ -128,6 +129,10 @@ export default function GamePage() {
   const myPlayer = players.find(p => p.player_id === playerId);
   const myPlayerNum = players.findIndex(p => p.player_id === playerId) + 1;
   const otherPlayers = players.filter(p => p.player_id !== playerId);
+
+  // Run bot engine (only host runs bots to avoid conflicts)
+  const isHost = room?.host_id === playerId;
+  useBlockBlastBotEngine(players, isHost, !!room && room.status === 'playing');
 
   // Get cell from screen coordinates
   const getCellFromPoint = useCallback((clientX: number, clientY: number): { row: number; col: number } | null => {
@@ -408,10 +413,15 @@ export default function GamePage() {
                 <motion.div
                   key={p.id}
                   layout
-                  className="glass rounded-2xl p-2 flex-shrink-0 min-w-[120px]"
+                  className={`glass rounded-2xl p-2 flex-shrink-0 min-w-[120px] ${
+                    p.is_bot ? 'border border-neon-cyan/30' : ''
+                  }`}
                 >
                   <div className="flex items-center justify-between mb-1.5 gap-2">
-                    <span className="font-semibold text-white text-xs truncate max-w-[70px]">{p.name}</span>
+                    <div className="flex items-center gap-1 min-w-0">
+                      {p.is_bot && <Bot size={10} className="text-neon-cyan flex-shrink-0" />}
+                      <span className="font-semibold text-white text-xs truncate max-w-[60px]">{p.name}</span>
+                    </div>
                     <motion.span
                       key={displayScore}
                       initial={{ scale: 1.5 }}
@@ -569,10 +579,12 @@ export default function GamePage() {
                 <div
                   key={p.id}
                   className={`flex items-center gap-2 text-sm px-2 py-1.5 rounded-lg ${
-                    p.player_id === playerId ? 'bg-neon-purple/20 text-white font-bold' : 'text-white/80'
+                    p.player_id === playerId ? 'bg-neon-purple/20 text-white font-bold' :
+                    p.is_bot ? 'bg-neon-cyan/10 text-white/90' : 'text-white/80'
                   }`}
                 >
                   <span className="w-6 text-center text-white/40 tabular-nums font-bold">{idx + 1}</span>
+                  {p.is_bot && <Bot size={12} className="text-neon-cyan flex-shrink-0" />}
                   <span className="flex-1 truncate">{p.name}</span>
                   <motion.span
                     key={displayScore}

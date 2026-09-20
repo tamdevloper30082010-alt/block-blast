@@ -1,11 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Copy, Check, Play, Crown, ArrowLeft, LogOut, Users, Gamepad2 } from 'lucide-react';
+import { Copy, Check, Play, Crown, ArrowLeft, LogOut, Users, Gamepad2, Bot } from 'lucide-react';
 import { supabase, type Room, type Player } from '../lib/supabase';
 import { getPlayerId } from '../lib/identity';
 import { sfx } from '../lib/audio';
 import { shuffleDeck, dealCards, generateSeed } from '../lib/tienlen/cards';
+import { getRandomPieces } from '../lib/pieces';
 
 export default function RoomPage() {
   const { code } = useParams<{ code: string }>();
@@ -71,12 +72,43 @@ export default function RoomPage() {
   const startGame = async () => {
     if (!room || !isHost) return;
     const isTienLen = room.game_type === 'tienlen';
-    const minPlayers = isTienLen ? 2 : 2;
+    const minPlayers = 2;
     if (players.length < minPlayers) {
       sfx.error();
       return;
     }
     sfx.click();
+
+    // Insert bot players if requested
+    const botCount = parseInt(sessionStorage.getItem(`bba.botCount.${room.id}`) || '0', 10);
+    const botPlayers: Player[] = [];
+    if (botCount > 0) {
+      for (let i = 0; i < botCount; i++) {
+        const botId = `00000000-0000-0000-0000-b00${String(i).padStart(4, '0')}`.slice(0, 36);
+        const botName = `Bot ${i + 1}`;
+        const emptyBoard = Array.from({ length: 8 }, () => Array(8).fill(0));
+        const initialPieces = isTienLen ? null : getRandomPieces(3);
+        const { data } = await supabase.from('players').insert({
+          room_id: room.id,
+          player_id: botId,
+          name: botName,
+          board: emptyBoard,
+          score: 0,
+          is_alive: true,
+          is_bot: true,
+          pieces: initialPieces,
+        }).select().single();
+        if (data) botPlayers.push(data);
+      }
+    }
+
+    // Reload players to include bots
+    const { data: allPlayers } = await supabase
+      .from('players')
+      .select('*')
+      .eq('room_id', room.id)
+      .order('joined_at', { ascending: true });
+    const finalPlayers = allPlayers || players;
 
     let updateData: any = { status: 'playing' };
 
@@ -84,9 +116,9 @@ export default function RoomPage() {
       // Initialize Tiến Lên game state
       const seed = generateSeed();
       const deck = shuffleDeck(seed);
-      const hands = dealCards(deck, players.length);
+      const hands = dealCards(deck, finalPlayers.length);
       const handsMap: Record<string, any> = {};
-      players.forEach((p, idx) => {
+      finalPlayers.forEach((p, idx) => {
         handsMap[p.player_id] = hands[idx];
       });
 
@@ -105,12 +137,12 @@ export default function RoomPage() {
       updateData.game_state = {
         deckSeed: seed,
         hands: handsMap,
-        turnOrder: players.map(p => p.player_id),
-        currentTurn: players[firstPlayerIdx].player_id,
+        turnOrder: finalPlayers.map(p => p.player_id),
+        currentTurn: finalPlayers[firstPlayerIdx].player_id,
         currentPlay: null,
         passCount: 0,
         winner: null,
-        lastWinner: players[firstPlayerIdx].player_id,
+        lastWinner: finalPlayers[firstPlayerIdx].player_id,
         startedAt: Date.now(),
       };
     } else {
@@ -222,14 +254,19 @@ export default function RoomPage() {
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: idx * 0.05 }}
                 className={`px-4 py-3 rounded-2xl flex items-center gap-3 ${
+                  p.is_bot ? 'bg-neon-cyan/10 border border-neon-cyan/30' :
                   p.player_id === playerId ? 'bg-neon-purple/20 border border-neon-purple/40' : 'bg-white/5 border border-white/10'
                 }`}
               >
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-neon-cyan to-neon-purple flex items-center justify-center font-bold text-sm">
-                  {p.name[0]?.toUpperCase() || '?'}
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                  p.is_bot ? 'bg-gradient-to-br from-neon-cyan to-neon-purple' :
+                  'bg-gradient-to-br from-neon-cyan to-neon-purple'
+                }`}>
+                  {p.is_bot ? <Bot size={16} /> : (p.name[0]?.toUpperCase() || '?')}
                 </div>
                 <span className="font-medium truncate flex-1 text-left">{p.name}</span>
                 {p.player_id === room.host_id && <Crown size={14} className="text-yellow-400" />}
+                {p.is_bot && <span className="text-xs text-neon-cyan">BOT</span>}
               </motion.div>
             ))}
             {Array.from({ length: needed }).map((_, i) => (

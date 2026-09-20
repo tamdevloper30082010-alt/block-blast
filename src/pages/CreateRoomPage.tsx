@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, Loader2, Users, Gamepad2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Users, Gamepad2, Bot } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { GameType } from '../lib/supabase';
 import { generateRoomCode } from '../lib/gameLogic';
@@ -16,6 +16,7 @@ const DURATIONS = [
 ];
 
 const PLAYER_COUNTS = [2, 3, 4];
+const BOT_COUNTS = [0, 1, 2, 3];
 
 const GAMES = [
   { id: 'block-blast', title: 'Block Blast', emoji: '🧩', desc: 'Xếp khối thi đấu điểm' },
@@ -31,16 +32,19 @@ export default function CreateRoomPage() {
   const [gameType, setGameType] = useState<GameType>(initialGame);
   const [duration, setDuration] = useState(180);
   const [maxPlayers, setMaxPlayers] = useState(4);
+  const [botCount, setBotCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (initialGame === 'tienlen') {
-      setDuration(0); // Tiến Lên doesn't use timer
+      setDuration(0);
       setMaxPlayers(4);
+      setBotCount(0);
     } else {
       setDuration(180);
       setMaxPlayers(4);
+      setBotCount(0);
     }
   }, [gameType]);
 
@@ -98,6 +102,8 @@ export default function CreateRoomPage() {
         board: emptyBoard,
         score: 0,
         is_alive: true,
+        is_bot: false,
+        pieces: null,
       });
 
       if (playerErr) {
@@ -106,6 +112,9 @@ export default function CreateRoomPage() {
         sfx.error();
         return;
       }
+
+      // Store bot count in sessionStorage so RoomPage can pick it up
+      sessionStorage.setItem(`bba.botCount.${room.id}`, String(botCount));
 
       sessionStorage.setItem(`bba.roomHost.${room.id}`, '1');
       nav(`/room/${room.code}`);
@@ -176,7 +185,7 @@ export default function CreateRoomPage() {
             <div>
               <label className="text-sm text-white/60 mb-2 font-medium flex items-center gap-1.5">
                 <Users size={14} />
-                Số người chơi
+                Số người chơi tối đa
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {PLAYER_COUNTS.map(n => (
@@ -196,6 +205,35 @@ export default function CreateRoomPage() {
               </div>
             </div>
 
+            <div>
+              <label className="text-sm text-white/60 mb-2 font-medium flex items-center gap-1.5">
+                <Bot size={14} />
+                Số bot thêm vào
+              </label>
+              <div className="grid grid-cols-4 gap-2">
+                {BOT_COUNTS.map(n => (
+                  <motion.button
+                    key={n}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => { setBotCount(n); sfx.click(); }}
+                    className={`py-3 rounded-2xl font-semibold transition-all ${
+                      botCount === n
+                        ? 'bg-gradient-to-r from-neon-cyan to-neon-purple text-white shadow-[0_0_20px_rgba(34,211,238,0.5)]'
+                        : 'bg-white/5 hover:bg-white/10 text-white/70 border border-white/10'
+                    }`}
+                  >
+                    {n === 0 ? 'Không' : `${n} bot`}
+                  </motion.button>
+                ))}
+              </div>
+              {botCount > 0 && (
+                <p className="text-xs text-white/40 mt-2 flex items-center gap-1.5">
+                  <Bot size={12} />
+                  Bot sẽ tự động chơi khi bắt đầu trận
+                </p>
+              )}
+            </div>
+
             {!isTienLen && (
               <div>
                 <label className="block text-sm text-white/60 mb-2 font-medium">Thời lượng trận đấu</label>
@@ -205,7 +243,7 @@ export default function CreateRoomPage() {
                       key={d.value}
                       whileTap={{ scale: 0.95 }}
                       onClick={() => { setDuration(d.value); sfx.click(); }}
-                      className={`py-3 rounded-2xl font-semibold transition-all ${
+                      className={`py-3 rounded-2xl font-semibold transition-all text-sm ${
                         duration === d.value
                           ? 'bg-gradient-to-r from-neon-cyan to-neon-purple text-white shadow-[0_0_20px_rgba(34,211,238,0.5)]'
                           : 'bg-white/5 hover:bg-white/10 text-white/70 border border-white/10'

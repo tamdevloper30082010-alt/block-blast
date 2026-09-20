@@ -1,13 +1,14 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowLeft, Send, SkipForward, Sparkles, Check, Trophy } from 'lucide-react';
+import { ArrowLeft, Send, SkipForward, Sparkles, Check, Trophy, Bot } from 'lucide-react';
 import { supabase, type Room, type Player, type TienLenState, type TienLenPlay } from '../lib/supabase';
 import { getPlayerId } from '../lib/identity';
 import { sfx, initAudio } from '../lib/audio';
 import { sortHand } from '../lib/tienlen/cards';
 import type { Card } from '../lib/tienlen/cards';
 import { detectCombination, canBeat, comboLabel, type Combination } from '../lib/tienlen/combinations';
+import { botDecideMove } from '../lib/bots/tienLenBot';
 import CardView from '../components/CardView';
 
 export default function TienLenGamePage() {
@@ -62,6 +63,7 @@ export default function TienLenGamePage() {
   }, [state, playerId]);
 
   const isMyTurn = state?.currentTurn === playerId;
+  const isHost = room?.host_id === playerId;
   const winner = state?.winner;
 
   const selectedCombo: Combination | null = useMemo(() => {
@@ -192,6 +194,68 @@ export default function TienLenGamePage() {
     return null;
   }
 
+  // BOT ENGINE — host runs bots on their turn
+  useEffect(() => {
+    if (!state || !room || !isHost || winner) return;
+    const currentPlayer = players.find(p => p.player_id === state.currentTurn);
+    if (!currentPlayer?.is_bot) return;
+
+    const timeout = setTimeout(async () => {
+      const decision = botDecideMove(state, state.currentTurn!);
+      if (decision.action === 'pass') {
+        await passTurn();
+      } else if (decision.cards) {
+        await botPlayCards(decision.cards);
+      }
+    }, 1500 + Math.random() * 1000); // 1.5-2.5s delay
+
+    return () => clearTimeout(timeout);
+  }, [state?.currentTurn, isHost, winner, players.length]);
+
+  async function botPlayCards(cards: Card[]) {
+    if (!state || !room || !playerId) return;
+    const botId = state.currentTurn;
+    if (!botId) return;
+    const combo = detectCombination(cards);
+    if (!combo) {
+      await passTurn();
+      return;
+    }
+
+    sfx.place();
+
+    const hand = state.hands[botId] || [];
+    const newHand = hand.filter(c => !cards.find(s => s.id === c.id));
+    const newHands = { ...state.hands, [botId]: newHand };
+    const newCurrentTurn = nextPlayerId(state, botId);
+    const newCurrentPlay: TienLenPlay | null = {
+      playerId: botId,
+      cards,
+      type: combo.type,
+      playedAt: Date.now(),
+    };
+
+    let newWinner: string | null = null;
+    if (newHand.length === 0) {
+      newWinner = botId;
+    }
+
+    const newState: TienLenState = {
+      ...state,
+      hands: newHands,
+      currentTurn: newWinner ? null : newCurrentTurn,
+      currentPlay: newCurrentPlay,
+      passCount: 0,
+      winner: newWinner,
+      lastWinner: newWinner ? botId : state.lastWinner,
+    };
+
+    await supabase.from('rooms').update({
+      game_state: newState,
+      status: newWinner ? 'finished' : 'playing',
+    }).eq('id', room.id);
+  }
+
   // Sort hand automatically when component mounts
   useEffect(() => {
     if (myHand.length > 0 && selected.length === 0) {
@@ -267,10 +331,13 @@ export default function TienLenGamePage() {
               animate={{ scale: isCurrentTurn ? 1.03 : 1 }}
               className={`glass rounded-2xl p-2 flex flex-col items-center ${
                 isCurrentTurn ? 'ring-2 ring-neon-cyan shadow-[0_0_20px_rgba(34,211,238,0.4)]' : ''
-              }`}
+              } ${p.is_bot ? 'border border-neon-cyan/30' : ''}`}
             >
               <div className="flex items-center justify-between w-full mb-1.5">
-                <span className="font-bold text-white text-xs truncate">{p.name}</span>
+                <div className="flex items-center gap-1 min-w-0">
+                  {p.is_bot && <Bot size={10} className="text-neon-cyan flex-shrink-0" />}
+                  <span className="font-bold text-white text-xs truncate">{p.name}</span>
+                </div>
                 <span className="font-display font-bold text-sm text-neon-cyan">{hand.length}</span>
               </div>
               <div className="flex -space-x-4">
